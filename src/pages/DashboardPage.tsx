@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AppLayout } from '../components/AppLayout'
 import { EventMap } from '../components/EventMap'
 import {
@@ -8,6 +8,7 @@ import {
   getEventCategoryStyle,
 } from '../data/eventCategories'
 import { getRecentEvents } from '../services/eonetService'
+import { generateInsights } from '../services/insightService'
 import type { DisasterEvent } from '../types/event'
 import '../App.css'
 
@@ -15,6 +16,7 @@ type EventDaysRange = 30 | 90 | 365
 type EventStatus = 'all' | 'open' | 'closed'
 
 export function DashboardPage() {
+  const requestIdRef = useRef(0)
   const [events, setEvents] = useState<DisasterEvent[]>([])
   const [selectedEvent, setSelectedEvent] = useState<DisasterEvent | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -22,12 +24,20 @@ export function DashboardPage() {
   const [retryCount, setRetryCount] = useState(0)
   const [daysRange, setDaysRange] = useState<EventDaysRange>(30)
   const [eventStatus, setEventStatus] = useState<EventStatus>('all')
+  const [currentTime, setCurrentTime] = useState(() => new Date())
+  const [isTimelinePlaying, setIsTimelinePlaying] = useState(false)
   const [selectedCategories, setSelectedCategories] = useState<string[]>(
     eventCategories.map((category) => category.id),
   )
 
   useEffect(() => {
     const controller = new AbortController()
+    const requestId = requestIdRef.current + 1
+    requestIdRef.current = requestId
+
+    function isCurrentRequest() {
+      return requestIdRef.current === requestId
+    }
 
     async function loadEvents() {
       try {
@@ -35,6 +45,7 @@ export function DashboardPage() {
         setError(null)
         setEvents([])
         setSelectedEvent(null)
+        setIsTimelinePlaying(false)
 
         const recentEvents = await getRecentEvents({
           days: daysRange,
@@ -42,15 +53,19 @@ export function DashboardPage() {
           signal: controller.signal,
         })
 
-        setEvents(recentEvents)
+        if (isCurrentRequest()) {
+          setEvents(recentEvents)
+          setCurrentTime(getLatestEventDate(recentEvents) ?? new Date())
+          setIsTimelinePlaying(false)
+        }
       } catch (loadError) {
-        if (loadError instanceof DOMException && loadError.name === 'AbortError') {
+        if (isAbortError(loadError) || !isCurrentRequest()) {
           return
         }
 
         setError('Recent events could not be loaded.')
       } finally {
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && isCurrentRequest()) {
           setIsLoading(false)
         }
       }
@@ -89,12 +104,47 @@ export function DashboardPage() {
     })
   }
 
-  const filteredEvents = events.filter((event) => {
+  const categoryFilteredEvents = events.filter((event) => {
     return selectedCategories.includes(getEventCategoryId(event.category))
   })
+  const filteredEvents = filterEventsByCurrentTime(categoryFilteredEvents, currentTime)
+  const insights = generateInsights(filteredEvents)
   const eventStats = getEventStats(filteredEvents)
   const categoryFilterOptions = getCategoryFilterOptions(events)
+  const timelineRange = getTimelineRange(events)
+  const timelineMaxTimestamp = timelineRange?.max.getTime() ?? null
   const sortedFilteredEvents = sortEventsByMostRecentDate(filteredEvents)
+
+  function handleTimelinePlay() {
+    if (timelineRange && currentTime.getTime() >= timelineRange.max.getTime()) {
+      setCurrentTime(timelineRange.min)
+    }
+
+    setIsTimelinePlaying(true)
+  }
+
+  useEffect(() => {
+    if (!isTimelinePlaying || timelineMaxTimestamp === null) {
+      return
+    }
+
+    const playbackTimer = window.setInterval(() => {
+      setCurrentTime((currentPlaybackTime) => {
+        const nextTimestamp = currentPlaybackTime.getTime() + ONE_DAY_IN_MS
+
+        if (nextTimestamp >= timelineMaxTimestamp) {
+          setIsTimelinePlaying(false)
+          return new Date(timelineMaxTimestamp)
+        }
+
+        return new Date(nextTimestamp)
+      })
+    }, TIMELINE_PLAYBACK_INTERVAL_MS)
+
+    return () => {
+      window.clearInterval(playbackTimer)
+    }
+  }, [isTimelinePlaying, timelineMaxTimestamp])
 
   useEffect(() => {
     if (
@@ -163,6 +213,18 @@ export function DashboardPage() {
                 selectedCategories={selectedCategories}
               />
 
+              {timelineRange && (
+                <TimelineSlider
+                  currentTime={currentTime}
+                  isPlaying={isTimelinePlaying}
+                  maxTime={timelineRange.max}
+                  minTime={timelineRange.min}
+                  onCurrentTimeChange={setCurrentTime}
+                  onPause={() => setIsTimelinePlaying(false)}
+                  onPlay={handleTimelinePlay}
+                />
+              )}
+
               <EventStatsSummary stats={eventStats} />
 
               <section className="sidebar-section" aria-label="Event list">
@@ -209,8 +271,97 @@ export function DashboardPage() {
             />
           )}
         </div>
+        {isSuccess && hasFilteredEvents && <InsightSummary insights={insights} />}
       </section>
     </AppLayout>
+  )
+}
+
+function isAbortError(error: unknown) {
+  return error instanceof DOMException
+    ? error.name === 'AbortError'
+    : error instanceof Error && error.name === 'AbortError'
+}
+
+function filterEventsByCurrentTime(events: DisasterEvent[], currentTime: Date) {
+  const currentTimestamp = currentTime.getTime()
+
+  return events.filter((event) => {
+    const eventTimestamp = Date.parse(event.date)
+
+    return Number.isFinite(eventTimestamp) && eventTimestamp <= currentTimestamp
+  })
+}
+
+function InsightSummary({ insights }: { insights: string[] }) {
+  return (
+    <section className="event-insights" aria-label="Insights">
+      <h3>Insights</h3>
+      <ul className="event-insights__list">
+        {insights.map((insight) => (
+          <li key={insight}>{insight}</li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function TimelineSlider({
+  currentTime,
+  isPlaying,
+  maxTime,
+  minTime,
+  onCurrentTimeChange,
+  onPause,
+  onPlay,
+}: {
+  currentTime: Date
+  isPlaying: boolean
+  maxTime: Date
+  minTime: Date
+  onCurrentTimeChange: (currentTime: Date) => void
+  onPause: () => void
+  onPlay: () => void
+}) {
+  const currentTimestamp = clampTimestamp(
+    currentTime.getTime(),
+    minTime.getTime(),
+    maxTime.getTime(),
+  )
+  const minTimestamp = minTime.getTime()
+  const maxTimestamp = maxTime.getTime()
+  const hasTimeRange = minTimestamp < maxTimestamp
+
+  return (
+    <section className="timeline-control sidebar-section" aria-label="Timeline replay">
+      <h3>Timeline</h3>
+      <p className="timeline-control__date">{formatDate(new Date(currentTimestamp).toISOString())}</p>
+      <div className="timeline-control__actions">
+        <button disabled={!hasTimeRange || isPlaying || currentTimestamp >= maxTimestamp} onClick={onPlay} type="button">
+          Play
+        </button>
+        <button disabled={!isPlaying} onClick={onPause} type="button">
+          Pause
+        </button>
+      </div>
+      <input
+        aria-label="Current timeline date"
+        disabled={!hasTimeRange}
+        max={maxTimestamp}
+        min={minTimestamp}
+        onChange={(event) => {
+          onPause()
+          onCurrentTimeChange(new Date(Number(event.target.value)))
+        }}
+        step={ONE_DAY_IN_MS}
+        type="range"
+        value={currentTimestamp}
+      />
+      <div className="timeline-control__bounds">
+        <span>{formatDate(minTime.toISOString())}</span>
+        <span>{formatDate(maxTime.toISOString())}</span>
+      </div>
+    </section>
   )
 }
 
@@ -525,6 +676,34 @@ function getSortableDate(date: string) {
   const time = Date.parse(date)
 
   return Number.isFinite(time) ? time : Number.NEGATIVE_INFINITY
+}
+
+const ONE_DAY_IN_MS = 24 * 60 * 60 * 1000
+const TIMELINE_PLAYBACK_INTERVAL_MS = 400
+
+function getTimelineRange(events: DisasterEvent[]) {
+  const eventTimes = events
+    .map((event) => Date.parse(event.date))
+    .filter(Number.isFinite)
+
+  if (eventTimes.length === 0) {
+    return null
+  }
+
+  return {
+    max: new Date(Math.max(...eventTimes)),
+    min: new Date(Math.min(...eventTimes)),
+  }
+}
+
+function getLatestEventDate(events: DisasterEvent[]) {
+  const timelineRange = getTimelineRange(events)
+
+  return timelineRange?.max ?? null
+}
+
+function clampTimestamp(timestamp: number, minTimestamp: number, maxTimestamp: number) {
+  return Math.min(Math.max(timestamp, minTimestamp), maxTimestamp)
 }
 
 function getCategoryBadgeStyle(color: string): CSSProperties {
