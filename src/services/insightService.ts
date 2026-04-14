@@ -6,6 +6,14 @@ type CategoryCount = {
   percentage: number
 }
 
+type CategoryTrend = {
+  category: string
+  change: number
+  previousCount: number
+  recentCount: number
+  trend: 'decreasing' | 'increasing' | 'stable'
+}
+
 type RegionCount = {
   count: number
   region: RegionName
@@ -30,15 +38,15 @@ export function generateInsights(events: DisasterEvent[]): string[] {
   const rankedRegions = getRankedRegions(events)
   const dominantCategory = rankedCategories[0]
 
-  const insights: string[] = [`The dataset includes ${totalEvents} total ${pluralize('event', totalEvents)}.`]
+  const insightsByImportance = [
+    [`Currently tracking ${totalEvents} active ${pluralize('event', totalEvents)} worldwide.`],
+    getDominanceInsights(rankedCategories),
+    getGeographicInsights(events, rankedRegions, dominantCategory),
+    getTrendInsights(events).slice(0, 1),
+    getSecondaryCategoryInsights(rankedCategories),
+  ]
 
-  insights.push(...getDominanceInsights(rankedCategories))
-  insights.push(...getSecondaryCategoryInsights(rankedCategories))
-  insights.push(...getGeographicInsights(events, rankedRegions, dominantCategory))
-  insights.push(...getDistributionInsights(rankedCategories))
-  insights.push(...getRareCategoryInsights(rankedCategories))
-
-  return Array.from(new Set(insights)).slice(0, 5)
+  return Array.from(new Set(insightsByImportance.flat())).slice(0, MAX_INSIGHTS)
 }
 
 function getRankedCategories(events: DisasterEvent[]): CategoryCount[] {
@@ -63,17 +71,17 @@ function getDominanceInsights(rankedCategories: CategoryCount[]) {
 
   if (dominantCategory.percentage > 70) {
     return [
-      `${dominantCategory.category} ${getCategoryVerb(dominantCategory.category)} overwhelmingly dominant, making up over 70% of all events.`,
+      `${dominantCategory.category} ${getCategoryVerb(dominantCategory.category)} strongly represented, accounting for over 70% of visible events.`,
     ]
   }
 
   if (dominantCategory.percentage >= 40) {
     return [
-      `${dominantCategory.category} ${getCategoryVerb(dominantCategory.category)} the leading category, representing a significant portion of events.`,
+      `${dominantCategory.category} ${getCategoryVerb(dominantCategory.category)} the most prominent category in this view.`,
     ]
   }
 
-  return ['Event distribution is relatively balanced across categories.']
+  return ['Event distribution appears relatively balanced across categories.']
 }
 
 function getSecondaryCategoryInsights(rankedCategories: CategoryCount[]) {
@@ -87,29 +95,117 @@ function getSecondaryCategoryInsights(rankedCategories: CategoryCount[]) {
   const comparison = secondaryCategory.count < dominantCategory.count / 2 ? 'significantly lower than' : 'close behind'
 
   return [
-    `${secondaryCategory.category} ranks as the second most common event type, ${comparison} ${dominantCategory.category}.`,
+    `${secondaryCategory.category} ${getCategoryVerb(secondaryCategory.category)} the next most common event type, ${comparison} ${dominantCategory.category}.`,
   ]
 }
 
-function getRareCategoryInsights(rankedCategories: CategoryCount[]) {
-  return rankedCategories
-    .filter((category) => category.percentage < 5)
-    .slice(0, 1)
-    .map((category) => `${category.category} appear infrequently in the current dataset.`)
-}
+function getTrendInsights(events: DisasterEvent[]) {
+  const trends = getCategoryTrends(events)
 
-function getDistributionInsights(rankedCategories: CategoryCount[]) {
-  const dominantCategory = rankedCategories[0]
-
-  if (!dominantCategory || dominantCategory.percentage <= 40) {
+  if (trends.length === 0) {
     return []
   }
 
-  if (dominantCategory.percentage > 70) {
-    return ['The dataset is heavily skewed toward a single category.']
+  return trends
+    .sort((first, second) => {
+      return getTrendPriority(second) - getTrendPriority(first) || first.category.localeCompare(second.category)
+    })
+    .map(getTrendInsight)
+}
+
+function getCategoryTrends(events: DisasterEvent[]): CategoryTrend[] {
+  const anchorTime = getLatestEventTime(events)
+
+  if (anchorTime === null) {
+    return []
   }
 
-  return ['The dataset shows a clear leading category without being completely one-sided.']
+  const recentStart = anchorTime - TREND_PERIOD_MS
+  const previousStart = anchorTime - TREND_PERIOD_MS * 2
+  const categoryCounts = new Map<string, { previousCount: number; recentCount: number }>()
+
+  for (const event of events) {
+    const eventTime = Date.parse(event.date)
+
+    if (!Number.isFinite(eventTime) || eventTime <= previousStart || eventTime > anchorTime) {
+      continue
+    }
+
+    const counts = categoryCounts.get(event.category) ?? {
+      previousCount: 0,
+      recentCount: 0,
+    }
+
+    if (eventTime > recentStart) {
+      counts.recentCount += 1
+    } else {
+      counts.previousCount += 1
+    }
+
+    categoryCounts.set(event.category, counts)
+  }
+
+  return [...categoryCounts.entries()]
+    .map(([category, counts]) => {
+      const change = counts.recentCount - counts.previousCount
+
+      return {
+        category,
+        change,
+        previousCount: counts.previousCount,
+        recentCount: counts.recentCount,
+        trend: getTrendDirection(change, counts.previousCount, counts.recentCount),
+      }
+    })
+    .filter((trend) => {
+      return trend.previousCount + trend.recentCount >= 2
+    })
+}
+
+function getTrendInsight(trend: CategoryTrend) {
+  const categoryLabel = getCategoryActivityLabel(trend.category)
+
+  if (trend.trend === 'increasing') {
+    return `Recent trends suggest ${getCategoryActivityLabel(trend.category)} activity may continue to rise.`
+  }
+
+  if (trend.trend === 'decreasing') {
+    return `Recent trends suggest ${categoryLabel} activity may be slightly declining.`
+  }
+
+  return `Recent trends suggest ${categoryLabel} activity is likely staying relatively stable.`
+}
+
+function getTrendDirection(
+  change: number,
+  previousCount: number,
+  recentCount: number,
+): CategoryTrend['trend'] {
+  if (Math.abs(change) < MINIMUM_TREND_CHANGE) {
+    return 'stable'
+  }
+
+  if (previousCount === 0) {
+    return recentCount >= MINIMUM_TREND_CHANGE ? 'increasing' : 'stable'
+  }
+
+  if (recentCount > previousCount * INCREASING_TREND_RATIO) {
+    return 'increasing'
+  }
+
+  if (recentCount < previousCount * DECREASING_TREND_RATIO) {
+    return 'decreasing'
+  }
+
+  return 'stable'
+}
+
+function getTrendPriority(trend: CategoryTrend) {
+  if (trend.trend === 'stable') {
+    return 0
+  }
+
+  return Math.abs(trend.change)
 }
 
 function getGeographicInsights(
@@ -133,15 +229,11 @@ function getGeographicInsights(
 
   const insights = dominantCategoryRegion
     ? [
-        `Most visible activity is concentrated in ${leadingRegion.region}, driven by ${dominantCategory?.category}.`,
+        `A significant visible cluster appears in ${leadingRegion.region}, largely tied to ${dominantCategory?.category}.`,
       ]
     : [
-        `Most current activity is concentrated in ${leadingRegion.region}.`,
+        `A large portion of visible activity appears in ${leadingRegion.region}.`,
       ]
-
-  if (secondaryRegion && secondaryRegion.count >= 2) {
-    insights.push(`${secondaryRegion.region} is the next most active region in the current dataset.`)
-  }
 
   return insights
 }
@@ -276,10 +368,32 @@ function countEventsByCategory(events: DisasterEvent[]) {
   }, {})
 }
 
+const TREND_PERIOD_MS = 7 * 24 * 60 * 60 * 1000
+const INCREASING_TREND_RATIO = 1.2
+const DECREASING_TREND_RATIO = 0.8
+const MINIMUM_TREND_CHANGE = 2
+const MAX_INSIGHTS = 5
+
+function getLatestEventTime(events: DisasterEvent[]) {
+  const eventTimes = events
+    .map((event) => Date.parse(event.date))
+    .filter(Number.isFinite)
+
+  if (eventTimes.length === 0) {
+    return null
+  }
+
+  return Math.max(...eventTimes)
+}
+
 function pluralize(word: string, count: number) {
   return count === 1 ? word : `${word}s`
 }
 
 function getCategoryVerb(category: string) {
   return category.endsWith('s') ? 'are' : 'is'
+}
+
+function getCategoryActivityLabel(category: string) {
+  return category.endsWith('s') ? category.slice(0, -1) : category
 }
