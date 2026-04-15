@@ -39,7 +39,7 @@ export function generateInsights(events: DisasterEvent[]): string[] {
   const dominantCategory = rankedCategories[0]
 
   const insightsByImportance = [
-    [`Currently tracking ${totalEvents} active ${pluralize('event', totalEvents)} worldwide.`],
+    [`Monitoring ${totalEvents} active global ${pluralize('signal', totalEvents)}.`],
     getDominanceInsights(rankedCategories),
     getGeographicInsights(events, rankedRegions, dominantCategory),
     getTrendInsights(events).slice(0, 1),
@@ -71,17 +71,17 @@ function getDominanceInsights(rankedCategories: CategoryCount[]) {
 
   if (dominantCategory.percentage > 70) {
     return [
-      `${dominantCategory.category} ${getCategoryVerb(dominantCategory.category)} strongly represented, accounting for over 70% of visible events.`,
+      `${dominantCategory.category} ${getCategoryVerb(dominantCategory.category)} the dominant signal, accounting for over 70% of monitored events.`,
     ]
   }
 
   if (dominantCategory.percentage >= 40) {
     return [
-      `${dominantCategory.category} ${getCategoryVerb(dominantCategory.category)} the most prominent category in this view.`,
+      `${dominantCategory.category} ${getCategoryVerb(dominantCategory.category)} the leading category in the current signal view.`,
     ]
   }
 
-  return ['Event distribution appears relatively balanced across categories.']
+  return ['Signal distribution is balanced across monitored categories.']
 }
 
 function getSecondaryCategoryInsights(rankedCategories: CategoryCount[]) {
@@ -95,7 +95,7 @@ function getSecondaryCategoryInsights(rankedCategories: CategoryCount[]) {
   const comparison = secondaryCategory.count < dominantCategory.count / 2 ? 'significantly lower than' : 'close behind'
 
   return [
-    `${secondaryCategory.category} ${getCategoryVerb(secondaryCategory.category)} the next most common event type, ${comparison} ${dominantCategory.category}.`,
+    `${secondaryCategory.category} ${getCategoryVerb(secondaryCategory.category)} the secondary signal type, ${comparison} ${dominantCategory.category}.`,
   ]
 }
 
@@ -166,14 +166,14 @@ function getTrendInsight(trend: CategoryTrend) {
   const categoryLabel = getCategoryActivityLabel(trend.category)
 
   if (trend.trend === 'increasing') {
-    return `Recent trends suggest ${getCategoryActivityLabel(trend.category)} activity may continue to rise.`
+    return `Trend projection: ${getCategoryActivityLabel(trend.category)} activity may continue to rise.`
   }
 
   if (trend.trend === 'decreasing') {
-    return `Recent trends suggest ${categoryLabel} activity may be slightly declining.`
+    return `Trend projection: ${categoryLabel} activity may continue to ease.`
   }
 
-  return `Recent trends suggest ${categoryLabel} activity is likely staying relatively stable.`
+  return `Trend projection: ${categoryLabel} activity remains stable.`
 }
 
 function getTrendDirection(
@@ -229,10 +229,10 @@ function getGeographicInsights(
 
   const insights = dominantCategoryRegion
     ? [
-        `A significant visible cluster appears in ${leadingRegion.region}, largely tied to ${dominantCategory?.category}.`,
+        `Significant regional concentration detected in ${leadingRegion.region}, primarily tied to ${dominantCategory?.category}.`,
       ]
     : [
-        `A large portion of visible activity appears in ${leadingRegion.region}.`,
+        `Elevated regional activity detected in ${leadingRegion.region}.`,
       ]
 
   return insights

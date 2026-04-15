@@ -1,28 +1,51 @@
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
+import { LiveDataPulse } from './LiveDataPulse'
+import { PageLoadingState, useLoadingTransition } from './PageLoadingState'
 
 type AppLayoutProps = {
   children: ReactNode
-  sidebar: ReactNode
+  isPageLoading?: boolean
+  leftPanel?: ReactNode
+  rightPanel?: ReactNode
+  sidebar?: ReactNode
 }
 
-export function AppLayout({ children, sidebar }: AppLayoutProps) {
+export function AppLayout({
+  children,
+  isPageLoading = false,
+  leftPanel,
+  rightPanel,
+  sidebar,
+}: AppLayoutProps) {
+  const {
+    contentClassName,
+    loadingClassName,
+    shouldRenderLoading,
+  } = useLoadingTransition(isPageLoading)
+
   return (
     <div className="app-shell">
       <header className="app-header">
         <div>
           <p className="app-header__eyebrow">Earth Insight Engine</p>
-          <h1 className="app-header__title">Environmental event dashboard</h1>
+          <h1 className="app-header__title">Global Environmental Intelligence Monitor</h1>
         </div>
         <div className="app-header__actions">
           <AppNavigation />
-          <p className="app-header__status">Ready for live NASA EONET data</p>
+          <LiveDataPulse />
         </div>
       </header>
 
-      <main className="app-content">
+      {shouldRenderLoading && <PageLoadingState className={loadingClassName} />}
+
+      <main
+        className={`app-content ${contentClassName}`}
+        aria-hidden={isPageLoading}
+      >
+        {leftPanel}
         {children}
-        {sidebar}
+        {rightPanel ?? sidebar}
       </main>
     </div>
   )
@@ -31,8 +54,9 @@ export function AppLayout({ children, sidebar }: AppLayoutProps) {
 export function AppNavigation() {
   return (
     <nav className="app-nav" aria-label="Primary navigation">
-      <NavLink to="/">Dashboard</NavLink>
-      <NavLink to="/analytics">Analytics</NavLink>
+      <NavLink to="/">Monitor</NavLink>
+      <NavLink to="/analytics">Signals</NavLink>
+      <NavLink to="/intelligence">Intelligence</NavLink>
     </nav>
   )
 }

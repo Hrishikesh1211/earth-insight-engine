@@ -2,13 +2,18 @@ import type { CSSProperties, ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppLayout } from '../components/AppLayout'
 import { EventMap } from '../components/EventMap'
+import { usePageLoading } from '../components/PageLoadingState'
+import { useTopLoadingProgress } from '../components/TopLoadingProgress'
+import { useData } from '../context/DataContext'
 import {
   eventCategories,
   getEventCategoryId,
   getEventCategoryStyle,
 } from '../data/eventCategories'
-import { getRecentEvents } from '../services/eonetService'
 import { generateInsights } from '../services/insightService'
+import { detectHotspots } from '../services/hotspotService'
+import type { Hotspot } from '../services/hotspotService'
+import { assessRisk } from '../services/riskService'
 import type { DisasterEvent } from '../types/event'
 import '../App.css'
 
@@ -23,17 +28,17 @@ type DashboardUrlState = {
 }
 
 export function DashboardPage() {
-  const requestIdRef = useRef(0)
+  const {
+    error,
+    events: dataEvents,
+    isLoading,
+    lastUpdatedAt,
+  } = useData()
   const [initialUrlState] = useState(getDashboardUrlState)
-  const [events, setEvents] = useState<DisasterEvent[]>([])
   const [selectedEvent, setSelectedEvent] = useState<DisasterEvent | null>(null)
   const [selectedEventId, setSelectedEventId] = useState<string | null>(
     initialUrlState.selectedEventId,
   )
-  const [isLoading, setIsLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [lastUpdatedAt, setLastUpdatedAt] = useState<Date | null>(null)
-  const [retryCount, setRetryCount] = useState(0)
   const [daysRange, setDaysRange] = useState<EventDaysRange>(initialUrlState.daysRange)
   const [eventStatus, setEventStatus] = useState<EventStatus>(initialUrlState.eventStatus)
   const [currentTime, setCurrentTime] = useState(() => new Date())
@@ -42,61 +47,6 @@ export function DashboardPage() {
   const [selectedCategories, setSelectedCategories] = useState<string[]>(
     initialUrlState.selectedCategories,
   )
-
-  useEffect(() => {
-    const controller = new AbortController()
-    const requestId = requestIdRef.current + 1
-    requestIdRef.current = requestId
-
-    function isCurrentRequest() {
-      return requestIdRef.current === requestId
-    }
-
-    async function loadEvents() {
-      try {
-        setIsLoading(true)
-        setError(null)
-        setEvents([])
-        setSelectedEvent(null)
-        setIsTimelinePlaying(false)
-
-        const recentEvents = await getRecentEvents({
-          days: daysRange,
-          status: eventStatus,
-          signal: controller.signal,
-        })
-
-        if (isCurrentRequest()) {
-          setEvents(recentEvents)
-          setCurrentTime(getLatestEventDate(recentEvents) ?? new Date())
-          setLastUpdatedAt(new Date())
-          setIsTimelinePlaying(false)
-        }
-      } catch (loadError) {
-        if (isAbortError(loadError) || !isCurrentRequest()) {
-          return
-        }
-
-        setError('Recent events could not be loaded.')
-      } finally {
-        if (!controller.signal.aborted && isCurrentRequest()) {
-          setIsLoading(false)
-        }
-      }
-    }
-
-    loadEvents()
-
-    return () => {
-      controller.abort()
-    }
-  }, [daysRange, eventStatus, retryCount])
-
-  const handleRetry = useCallback(() => {
-    setError(null)
-    setIsLoading(true)
-    setRetryCount((currentRetryCount) => currentRetryCount + 1)
-  }, [])
 
   const handleDaysRangeChange = useCallback((nextDaysRange: EventDaysRange) => {
     setDaysRange(nextDaysRange)
@@ -131,15 +81,23 @@ export function DashboardPage() {
     setSelectedEventId(event.id)
   }, [])
 
+  const events = useMemo(() => {
+    return filterEventsByControls(dataEvents, daysRange, eventStatus)
+  }, [dataEvents, daysRange, eventStatus])
+  const selectedCategorySet = useMemo(() => {
+    return new Set(selectedCategories)
+  }, [selectedCategories])
   const filteredEvents = useMemo(() => {
     return events.filter((event) => {
-      return selectedCategories.includes(getEventCategoryId(event.category))
+      return selectedCategorySet.has(getEventCategoryId(event.category))
     })
-  }, [events, selectedCategories])
+  }, [events, selectedCategorySet])
   const visibleEvents = useMemo(() => {
     return filterEventsByCurrentTime(filteredEvents, currentTime)
   }, [currentTime, filteredEvents])
   const insights = useMemo(() => generateInsights(visibleEvents), [visibleEvents])
+  const riskAssessment = useMemo(() => assessRisk(visibleEvents), [visibleEvents])
+  const hotspots = useMemo(() => detectHotspots(visibleEvents), [visibleEvents])
   const eventStats = useMemo(() => getEventStats(visibleEvents), [visibleEvents])
   const categoryFilterOptions = useMemo(() => getCategoryFilterOptions(events), [events])
   const timelineRange = useMemo(() => getTimelineRange(events), [events])
@@ -147,9 +105,19 @@ export function DashboardPage() {
   const sortedVisibleEvents = useMemo(() => {
     return sortEventsByMostRecentDate(visibleEvents)
   }, [visibleEvents])
+  const recentFiveDayEvents = useMemo(() => {
+    return getRecentEventsWithinDays(filteredEvents, RECENT_EVENT_WINDOW_DAYS)
+      .slice(0, RECENT_EVENT_LIST_LIMIT)
+  }, [filteredEvents])
   const listEvents = useMemo(() => {
     return sortedVisibleEvents.slice(0, EVENT_LIST_LIMIT)
   }, [sortedVisibleEvents])
+
+  useEffect(() => {
+    setCurrentTime(getLatestEventDate(events) ?? new Date())
+    setSelectedEvent(null)
+    setIsTimelinePlaying(false)
+  }, [daysRange, eventStatus, events])
 
   const handleTimelinePlay = useCallback(() => {
     if (timelineRange && currentTime.getTime() >= timelineRange.max.getTime()) {
@@ -252,48 +220,46 @@ export function DashboardPage() {
   const isError = !isLoading && error !== null
   const isEmpty = !isLoading && !error && !hasEvents
   const isSuccess = !isLoading && !error && hasEvents
+  const isPageLoading = usePageLoading(isLoading)
+  useTopLoadingProgress(isPageLoading)
   const areAllCategoriesSelected =
     selectedCategories.length === eventCategories.length
 
   return (
     <AppLayout
-      sidebar={
-        <aside className="insights-panel" aria-label="Events and insights">
-          <h2>Events and insights</h2>
+      isPageLoading={isPageLoading}
+      leftPanel={
+        <aside className="dashboard-panel dashboard-panel--left" aria-label="Data controls and event signal queue">
+          <h2>Data Controls</h2>
 
-          {isLoading && <p className="sidebar-message">Loading recent events...</p>}
+          {isLoading && <p className="sidebar-message">Loading recent signals...</p>}
 
           {isError && (
             <div className="state-message state-message--error">
               <p>{error}</p>
-              <button className="retry-button" onClick={handleRetry} type="button">
-                Retry
-              </button>
             </div>
           )}
 
           {isEmpty && (
-            <p className="sidebar-message">No recent events with coordinates found.</p>
+            <p className="sidebar-message">No geolocated signals detected.</p>
           )}
-
-          <section className="event-detail sidebar-section" aria-label="Selected event details">
-            <h3>Selected Event Details</h3>
-            {selectedEvent ? (
-              <EventDetails event={selectedEvent} />
-            ) : (
-              <div className="event-detail__empty">
-                <p>No event selected</p>
-                <span>Choose an event from the list or map to inspect it.</span>
-              </div>
-            )}
-          </section>
 
           {isSuccess && (
             <>
+              {lastUpdatedAt && <LastUpdatedStatus lastUpdatedAt={lastUpdatedAt} />}
+
+              {hasVisibleEvents && <EventStatsSummary stats={eventStats} />}
+
+              <RecentEventsSection
+                events={recentFiveDayEvents}
+                onSelectEvent={handleEventSelect}
+                selectedEvent={selectedEvent}
+                windowDays={RECENT_EVENT_WINDOW_DAYS}
+              />
+
               <DatasetControls
                 daysRange={daysRange}
                 eventStatus={eventStatus}
-                lastUpdatedAt={lastUpdatedAt}
                 onDaysRangeChange={handleDaysRangeChange}
                 onEventStatusChange={handleEventStatusChange}
               />
@@ -320,10 +286,8 @@ export function DashboardPage() {
                 selectedCategories={selectedCategories}
               />
 
-              {hasVisibleEvents && <EventStatsSummary stats={eventStats} />}
-
-              <section className="event-list-section sidebar-section" aria-label="Event list">
-                <h3>Event List</h3>
+              <section className="event-list-section sidebar-section" aria-label="Event signal queue">
+                <h3>Event Signal Queue</h3>
                 {hasVisibleEvents ? (
                   <EventList
                     events={listEvents}
@@ -332,53 +296,64 @@ export function DashboardPage() {
                     selectedEvent={selectedEvent}
                   />
                 ) : (
-                  <p className="sidebar-message">No events match the current filters or time selection.</p>
+                  <p className="sidebar-message">No signals match the active controls or time window.</p>
                 )}
               </section>
             </>
           )}
         </aside>
       }
+      rightPanel={
+        <aside className="dashboard-panel dashboard-panel--right" aria-label="Event intelligence panel">
+          <h2>Event Intelligence Panel</h2>
+
+          <section className="event-detail sidebar-section" aria-label="Selected event profile">
+            <h3>Selected Event Profile</h3>
+            {selectedEvent ? (
+              <EventDetails event={selectedEvent} />
+            ) : (
+              <div className="event-detail__empty">
+                <p>No active selection</p>
+                <span>Select a signal from the queue or map.</span>
+              </div>
+            )}
+          </section>
+
+          {isSuccess && hasVisibleEvents && <RiskOverview riskAssessment={riskAssessment} />}
+
+          {isSuccess && hasVisibleEvents && <HotspotOverview hotspots={hotspots} />}
+        </aside>
+      }
     >
       <section className="map-panel" aria-label="Map workspace">
         <div className="panel-header">
-          <h2>Global event map</h2>
-          <p>Map integration area for event locations, layers, and filters.</p>
+          <h2>Global Event Monitor</h2>
+          <p>Live geospatial view of event signals and operational layers.</p>
         </div>
         <div className="map-placeholder">
-          {isLoading && <MapStateMessage message="Loading map events..." />}
+          {isLoading && <MapStateMessage message="Loading geospatial signals..." />}
 
           {isError && (
             <MapStateMessage
-              action={
-                <button className="retry-button" onClick={handleRetry} type="button">
-                  Retry
-                </button>
-              }
-              message="Map events could not be loaded."
+              message="Geospatial signals could not be loaded."
             />
           )}
 
           {!isLoading && !isError && (
             <EventMap
               events={visibleEvents}
+              hotspots={hotspots}
               onSelectEvent={handleEventSelect}
               selectedEvent={selectedEvent}
             />
           )}
         </div>
         {isSuccess && hasVisibleEvents && (
-          <InsightSummary insights={insights} title="Insights" />
+          <InsightSummary insights={insights} title="Global Intelligence Feed" />
         )}
       </section>
     </AppLayout>
   )
-}
-
-function isAbortError(error: unknown) {
-  return error instanceof DOMException
-    ? error.name === 'AbortError'
-    : error instanceof Error && error.name === 'AbortError'
 }
 
 function filterEventsByCurrentTime(events: DisasterEvent[], currentTime: Date) {
@@ -388,6 +363,29 @@ function filterEventsByCurrentTime(events: DisasterEvent[], currentTime: Date) {
     const eventTimestamp = Date.parse(event.date)
 
     return Number.isFinite(eventTimestamp) && eventTimestamp <= currentTimestamp
+  })
+}
+
+function filterEventsByControls(
+  events: DisasterEvent[],
+  daysRange: EventDaysRange,
+  eventStatus: EventStatus,
+) {
+  const latestEventDate = getLatestEventDate(events)
+  const minTimestamp = latestEventDate
+    ? latestEventDate.getTime() - daysRange * ONE_DAY_IN_MS
+    : Number.NEGATIVE_INFINITY
+
+  return events.filter((event) => {
+    const eventTimestamp = Date.parse(event.date)
+    const matchesDateRange =
+      Number.isFinite(eventTimestamp) && eventTimestamp >= minTimestamp
+    const matchesStatus =
+      eventStatus === 'all' ||
+      (eventStatus === 'open' && event.isOpen) ||
+      (eventStatus === 'closed' && !event.isOpen)
+
+    return matchesDateRange && matchesStatus
   })
 }
 
@@ -408,6 +406,94 @@ function InsightSummary({
       </ul>
     </section>
   )
+}
+
+function RiskOverview({
+  riskAssessment,
+}: {
+  riskAssessment: ReturnType<typeof assessRisk>
+}) {
+  const visibleCategoryRisk = riskAssessment.categoryRisk.slice(0, 5)
+
+  return (
+    <section className="risk-overview sidebar-section" aria-label="Risk assessment">
+      <div className="risk-overview__header">
+        <h3>Risk Assessment</h3>
+        <span
+          className="risk-level"
+          data-level={riskAssessment.overallRisk.toLowerCase()}
+        >
+          {riskAssessment.overallRisk}
+        </span>
+      </div>
+      <p className="risk-overview__summary">{riskAssessment.overallReason}</p>
+
+      <ul className="risk-overview__list">
+        {visibleCategoryRisk.map((risk) => (
+          <li data-level={risk.level.toLowerCase()} key={risk.category}>
+            <div className="risk-overview__row">
+              <span>{risk.category}</span>
+              <span
+                className="risk-level"
+                data-level={risk.level.toLowerCase()}
+              >
+                {risk.level}
+              </span>
+            </div>
+            <p>{risk.reason}</p>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}
+
+function HotspotOverview({ hotspots }: { hotspots: Hotspot[] }) {
+  return (
+    <section className="hotspot-overview sidebar-section" aria-label="Hotspot detection">
+      <div className="risk-overview__header">
+        <h3>Hotspot Detection</h3>
+        <span className="hotspot-overview__badge">{hotspots.length}</span>
+      </div>
+
+      {hotspots.length > 0 ? (
+        <ul className="hotspot-list">
+          {hotspots.slice(0, 4).map((hotspot) => (
+            <li data-intensity={hotspot.intensity} key={hotspot.id}>
+              <div className="risk-overview__row">
+                <strong>{hotspot.label}</strong>
+                <span>{hotspot.count} signals</span>
+              </div>
+              <p>{getHotspotDetectionMessage(hotspot.dominantCategory)}</p>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="sidebar-message">No unusually dense clusters detected in the current view.</p>
+      )}
+    </section>
+  )
+}
+
+function getHotspotDetectionMessage(category: string) {
+  const activityTypeByCategory = new Map([
+    ['Drought', 'drought'],
+    ['Dust and Haze', 'dust and haze'],
+    ['Earthquakes', 'earthquake'],
+    ['Floods', 'flood'],
+    ['Landslides', 'landslide'],
+    ['Manmade', 'manmade'],
+    ['Sea and Lake Ice', 'sea and lake ice'],
+    ['Severe Storms', 'severe storm'],
+    ['Snow', 'snow'],
+    ['Temperature Extremes', 'temperature extreme'],
+    ['Volcanoes', 'volcanic'],
+    ['Water Color', 'water color'],
+    ['Wildfires', 'wildfire'],
+  ])
+  const activityType = activityTypeByCategory.get(category) ?? category.toLowerCase()
+
+  return `High-density ${activityType} activity zone detected.`
 }
 
 function TimelineSlider({
@@ -524,31 +610,32 @@ function TimelineSlider({
   )
 }
 
+function LastUpdatedStatus({ lastUpdatedAt }: { lastUpdatedAt: Date }) {
+  return (
+    <section className="last-updated last-updated--top" aria-label="Feed freshness">
+      <span>Last Updated</span>
+      <time dateTime={lastUpdatedAt.toISOString()}>
+        {formatFreshnessTime(lastUpdatedAt)}
+      </time>
+    </section>
+  )
+}
+
 function DatasetControls({
   daysRange,
   eventStatus,
-  lastUpdatedAt,
   onDaysRangeChange,
   onEventStatusChange,
 }: {
   daysRange: EventDaysRange
   eventStatus: EventStatus
-  lastUpdatedAt: Date | null
   onDaysRangeChange: (daysRange: EventDaysRange) => void
   onEventStatusChange: (eventStatus: EventStatus) => void
 }) {
   return (
-    <section className="dataset-controls sidebar-section" aria-label="Dataset controls">
+    <section className="dataset-controls sidebar-section" aria-label="Data controls">
       <div className="dataset-controls__header">
-        <h3>Dataset Controls</h3>
-        {lastUpdatedAt && (
-          <p className="last-updated">
-            <span>Last Updated</span>
-            <time dateTime={lastUpdatedAt.toISOString()}>
-              {formatFreshnessTime(lastUpdatedAt)}
-            </time>
-          </p>
-        )}
+        <h3>Feed Parameters</h3>
       </div>
       <div className="dataset-control">
         <h4>Date range</h4>
@@ -626,6 +713,21 @@ function sortEventsByMostRecentDate(events: DisasterEvent[]) {
   })
 }
 
+function getRecentEventsWithinDays(events: DisasterEvent[], days: number) {
+  const currentTimestamp = Date.now()
+  const minTimestamp = currentTimestamp - days * ONE_DAY_IN_MS
+
+  return sortEventsByMostRecentDate(events).filter((event) => {
+    const eventTimestamp = Date.parse(event.date)
+
+    return (
+      Number.isFinite(eventTimestamp) &&
+      eventTimestamp >= minTimestamp &&
+      eventTimestamp <= currentTimestamp
+    )
+  })
+}
+
 function getEventStats(events: DisasterEvent[]): EventStats {
   const countMap = new Map<string, CategoryCount>()
 
@@ -652,10 +754,10 @@ function getEventStats(events: DisasterEvent[]): EventStats {
 
 function EventStatsSummary({ stats }: { stats: EventStats }) {
   return (
-    <section className="event-stats sidebar-section" aria-label="Filtered event summary">
-      <h3>Stats Summary</h3>
+    <section className="event-stats sidebar-section" aria-label="Event signal summary">
+      <h3>Event Signal Summary</h3>
       <div className="event-stats__total">
-        <span>Total events</span>
+        <span>Total signals</span>
         <strong>{stats.total}</strong>
       </div>
 
@@ -691,9 +793,9 @@ function EventFilters({
   selectedCategories: string[]
 }) {
   return (
-    <section className="event-filters sidebar-section" aria-label="Event category filters">
+    <section className="event-filters sidebar-section" aria-label="Signal data controls">
       <div className="event-filters__header">
-        <h3>Category Filters</h3>
+        <h3>Signal Controls</h3>
         <button onClick={onCategorySelectionToggle} type="button">
           {areAllCategoriesSelected ? 'Clear All' : 'Select All'}
         </button>
@@ -730,6 +832,57 @@ function EventFilters({
   )
 }
 
+function RecentEventsSection({
+  events,
+  onSelectEvent,
+  selectedEvent,
+  windowDays,
+}: {
+  events: DisasterEvent[]
+  onSelectEvent: (event: DisasterEvent) => void
+  selectedEvent: DisasterEvent | null
+  windowDays: number
+}) {
+  return (
+    <section className="recent-events-section sidebar-section" aria-label="Recent event signals">
+      <div className="recent-events-section__header">
+        <h3>Recent Event Signals</h3>
+        <span>Past {windowDays} days</span>
+      </div>
+
+      {events.length > 0 ? (
+        <ul className="recent-events-list">
+          {events.map((event) => {
+            const isSelected = selectedEvent?.id === event.id
+            const category = getEventCategoryStyle(event.category)
+
+            return (
+              <li key={event.id}>
+                <button
+                  className="recent-event-card"
+                  aria-pressed={isSelected}
+                  onClick={() => onSelectEvent(event)}
+                  type="button"
+                >
+                  <span className="recent-event-card__dot" style={getCategoryDotStyle(category.color)} />
+                  <span className="recent-event-card__content">
+                    <span className="recent-event-card__title">{event.title}</span>
+                    <span className="recent-event-card__meta">
+                      {category.label} / {formatDate(event.date)}
+                    </span>
+                  </span>
+                </button>
+              </li>
+            )
+          })}
+        </ul>
+      ) : (
+        <p className="sidebar-message">No event signals detected in the past {windowDays} days.</p>
+      )}
+    </section>
+  )
+}
+
 function EventList({
   events,
   onSelectEvent,
@@ -744,7 +897,7 @@ function EventList({
   return (
     <>
       <p className="event-list__note">
-        Showing top {Math.min(EVENT_LIST_LIMIT, totalEvents)} events
+        Showing top {Math.min(EVENT_LIST_LIMIT, totalEvents)} signals
       </p>
       <ul className="event-list">
         {events.map((event) => {
@@ -826,10 +979,10 @@ function EventDetails({ event }: { event: DisasterEvent }) {
           <dd>
             {event.link ? (
               <a href={event.link} rel="noreferrer" target="_blank">
-                Open source
+                Open source record
               </a>
             ) : (
-              'No source link available'
+              'No source record available'
             )}
           </dd>
         </div>
@@ -867,6 +1020,8 @@ const ONE_DAY_IN_MS = 24 * 60 * 60 * 1000
 const TIMELINE_PLAYBACK_INTERVAL_MS = 400
 const TIMELINE_SLIDER_DEBOUNCE_MS = 150
 const EVENT_LIST_LIMIT = 100
+const RECENT_EVENT_LIST_LIMIT = 6
+const RECENT_EVENT_WINDOW_DAYS = 5
 const PLAYBACK_SPEED_OPTIONS: PlaybackSpeed[] = [1, 2, 5]
 const DEFAULT_DAYS_RANGE: EventDaysRange = 30
 const DEFAULT_EVENT_STATUS: EventStatus = 'all'

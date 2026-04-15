@@ -2,6 +2,7 @@ import { memo, useEffect, useMemo } from 'react'
 import type { CSSProperties } from 'react'
 import {
   divIcon,
+  heatLayer,
   latLngBounds,
   point,
   type LatLngExpression,
@@ -15,16 +16,19 @@ import {
   useMap,
 } from 'react-leaflet'
 import 'leaflet/dist/leaflet.css'
+import 'leaflet.heat'
 import 'leaflet.markercluster/dist/MarkerCluster.css'
 import 'leaflet.markercluster/dist/MarkerCluster.Default.css'
 import {
   getEventCategoryId,
   getEventCategoryStyle,
 } from '../data/eventCategories'
+import type { Hotspot } from '../services/hotspotService'
 import type { DisasterEvent } from '../types/event'
 
 type EventMapProps = {
   events: DisasterEvent[]
+  hotspots?: Hotspot[]
   selectedEvent: DisasterEvent | null
   onSelectEvent: (event: DisasterEvent) => void
 }
@@ -46,6 +50,7 @@ const WORLD_BOUNDS = latLngBounds([
 
 export const EventMap = memo(function EventMap({
   events,
+  hotspots = [],
   selectedEvent,
   onSelectEvent,
 }: EventMapProps) {
@@ -81,7 +86,6 @@ export const EventMap = memo(function EventMap({
       )
     })
   }, [eventsWithCoordinates, onSelectEvent, selectedEventId])
-
   return (
     <MapContainer
       className="event-map"
@@ -107,6 +111,7 @@ export const EventMap = memo(function EventMap({
         url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}"
       />
       <SelectedEventView selectedEvent={selectedEvent} />
+      <HotspotHeatLayer hotspots={hotspots} />
       <MarkerClusterGroup
         chunkedLoading
         disableClusteringAtZoom={CLUSTER_EXPAND_ZOOM}
@@ -122,6 +127,52 @@ export const EventMap = memo(function EventMap({
     </MapContainer>
   )
 })
+
+function HotspotHeatLayer({ hotspots }: { hotspots: Hotspot[] }) {
+  const map = useMap()
+  const heatPoints = useMemo(() => {
+    return getHotspotHeatPoints(hotspots)
+  }, [hotspots])
+
+  useEffect(() => {
+    if (heatPoints.length === 0) {
+      return
+    }
+
+    const layer = heatLayer(heatPoints, {
+      blur: 32,
+      gradient: {
+        0.24: '#7f1d1d',
+        0.62: '#f97316',
+        1: '#ef4444',
+      },
+      max: 1,
+      maxZoom: MAX_ZOOM,
+      minOpacity: 0.24,
+      radius: 34,
+    })
+
+    layer.addTo(map)
+
+    return () => {
+      layer.removeFrom(map)
+    }
+  }, [heatPoints, map])
+
+  return null
+}
+
+function getHotspotHeatPoints(hotspots: Hotspot[]) {
+  const maxCount = Math.max(1, ...hotspots.map((hotspot) => hotspot.count))
+
+  return hotspots.map((hotspot) => {
+    return [
+      hotspot.centerLatitude,
+      hotspot.centerLongitude,
+      Math.max(0.28, hotspot.count / maxCount),
+    ] satisfies [number, number, number]
+  })
+}
 
 type MapLegendEntry = {
   color: string
