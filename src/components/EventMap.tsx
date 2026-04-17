@@ -1,12 +1,11 @@
 import { memo, useEffect, useMemo } from 'react'
 import type { CSSProperties } from 'react'
-import {
+import L, {
   divIcon,
   latLngBounds,
   point,
   type LatLngExpression,
 } from 'leaflet'
-import * as Leaflet from 'leaflet'
 import MarkerClusterGroup from 'react-leaflet-markercluster'
 import {
   MapContainer,
@@ -111,7 +110,7 @@ export const EventMap = memo(function EventMap({
         url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}"
       />
       <SelectedEventView selectedEvent={selectedEvent} />
-      <HotspotHeatLayer hotspots={hotspots} />
+      <HotspotHeatLayer events={eventsWithCoordinates} hotspots={hotspots} />
       <MarkerClusterGroup
         chunkedLoading
         disableClusteringAtZoom={CLUSTER_EXPAND_ZOOM}
@@ -128,32 +127,44 @@ export const EventMap = memo(function EventMap({
   )
 })
 
-function HotspotHeatLayer({ hotspots }: { hotspots: Hotspot[] }) {
+function HotspotHeatLayer({
+  events,
+  hotspots,
+}: {
+  events: DisasterEvent[]
+  hotspots: Hotspot[]
+}) {
   const map = useMap()
   const heatPoints = useMemo(() => {
-    return getHotspotHeatPoints(hotspots)
-  }, [hotspots])
+    if (hotspots.length > 0) {
+      return getHotspotHeatPoints(hotspots)
+    }
+
+    return getEventHeatPoints(events)
+  }, [events, hotspots])
 
   useEffect(() => {
     if (heatPoints.length === 0) {
       return
     }
 
-    if (typeof Leaflet.heatLayer !== 'function') {
+    if (typeof L.heatLayer !== 'function') {
+      console.warn('Leaflet heat layer plugin is unavailable.')
       return
     }
 
-    const layer = Leaflet.heatLayer(heatPoints, {
-      blur: 32,
+    const layer = L.heatLayer(heatPoints, {
+      blur: 28,
       gradient: {
-        0.24: '#7f1d1d',
-        0.62: '#f97316',
+        0.18: '#2a889b',
+        0.5: '#f8d66d',
+        0.82: '#f97316',
         1: '#ef4444',
       },
       max: 1,
       maxZoom: MAX_ZOOM,
-      minOpacity: 0.24,
-      radius: 34,
+      minOpacity: 0.34,
+      radius: hotspots.length > 0 ? 42 : 28,
     })
 
     layer.addTo(map)
@@ -161,7 +172,7 @@ function HotspotHeatLayer({ hotspots }: { hotspots: Hotspot[] }) {
     return () => {
       layer.removeFrom(map)
     }
-  }, [heatPoints, map])
+  }, [heatPoints, hotspots.length, map])
 
   return null
 }
@@ -174,6 +185,18 @@ function getHotspotHeatPoints(hotspots: Hotspot[]) {
       hotspot.centerLatitude,
       hotspot.centerLongitude,
       Math.max(0.28, hotspot.count / maxCount),
+    ] satisfies [number, number, number]
+  })
+}
+
+function getEventHeatPoints(events: DisasterEvent[]) {
+  const maxWeight = Math.max(1, events.length)
+
+  return events.map((event) => {
+    return [
+      event.latitude,
+      event.longitude,
+      Math.max(0.22, Math.min(0.72, 1 / Math.sqrt(maxWeight))),
     ] satisfies [number, number, number]
   })
 }
