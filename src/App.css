@@ -440,6 +440,38 @@
   padding: 16px 24px 32px;
 }
 
+.app-error {
+  min-height: 100vh;
+  display: grid;
+  align-content: center;
+  gap: 14px;
+  padding: 32px;
+  background: var(--bg-page);
+  color: var(--text-primary);
+}
+
+.app-error h1 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.app-error p {
+  max-width: 620px;
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+.app-error pre {
+  max-width: 760px;
+  overflow: auto;
+  margin: 0;
+  padding: 14px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+  color: var(--text-primary);
+}
+
 .analytics-page {
   display: grid;
   padding: 24px 28px 40px;

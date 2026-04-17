@@ -2,11 +2,11 @@ import { memo, useEffect, useMemo } from 'react'
 import type { CSSProperties } from 'react'
 import {
   divIcon,
-  heatLayer,
   latLngBounds,
   point,
   type LatLngExpression,
 } from 'leaflet'
+import * as Leaflet from 'leaflet'
 import MarkerClusterGroup from 'react-leaflet-markercluster'
 import {
   MapContainer,
@@ -139,7 +139,11 @@ function HotspotHeatLayer({ hotspots }: { hotspots: Hotspot[] }) {
       return
     }
 
-    const layer = heatLayer(heatPoints, {
+    if (typeof Leaflet.heatLayer !== 'function') {
+      return
+    }
+
+    const layer = Leaflet.heatLayer(heatPoints, {
       blur: 32,
       gradient: {
         0.24: '#7f1d1d',
