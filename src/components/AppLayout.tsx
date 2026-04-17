@@ -1,7 +1,8 @@
 import type { ReactNode } from 'react'
 import { NavLink } from 'react-router-dom'
+import { useLoadingTransition } from '../hooks/useLoadingTransition'
 import { LiveDataPulse } from './LiveDataPulse'
-import { PageLoadingState, useLoadingTransition } from './PageLoadingState'
+import { PageLoadingState } from './PageLoadingState'
 
 type AppLayoutProps = {
   children: ReactNode

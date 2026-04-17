@@ -75,8 +75,6 @@ It is designed to simulate a **mission-control-style monitoring system** for env
 ---
 
 ## 📸 Screenshots
-
-> Add screenshots here:
 - Main Page
 ![alt text](image.png)
 - Signals Page:

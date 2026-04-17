@@ -1,16 +1,8 @@
 import type { ReactNode } from 'react'
-import { createContext, useContext, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { getRecentEvents } from '../services/eonetService'
 import type { DisasterEvent } from '../types/event'
-
-type DataContextValue = {
-  error: string | null
-  events: DisasterEvent[]
-  isLoading: boolean
-  lastUpdatedAt: Date | null
-}
-
-const DataContext = createContext<DataContextValue | null>(null)
+import { DataContext } from './DataContextStore'
 
 export function DataProvider({ children }: { children: ReactNode }) {
   const [events, setEvents] = useState<DisasterEvent[]>([])
@@ -68,16 +60,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
       {children}
     </DataContext.Provider>
   )
-}
-
-export function useData() {
-  const context = useContext(DataContext)
-
-  if (!context) {
-    throw new Error('useData must be used within DataProvider.')
-  }
-
-  return context
 }
 
 function isAbortError(error: unknown) {

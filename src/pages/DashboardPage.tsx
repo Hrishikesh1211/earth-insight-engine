@@ -2,14 +2,14 @@ import type { CSSProperties, ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AppLayout } from '../components/AppLayout'
 import { EventMap } from '../components/EventMap'
-import { usePageLoading } from '../components/PageLoadingState'
-import { useTopLoadingProgress } from '../components/TopLoadingProgress'
-import { useData } from '../context/DataContext'
 import {
   eventCategories,
   getEventCategoryId,
   getEventCategoryStyle,
 } from '../data/eventCategories'
+import { useData } from '../hooks/useData'
+import { usePageLoading } from '../hooks/usePageLoading'
+import { useTopLoadingProgress } from '../hooks/useTopLoadingProgress'
 import { generateInsights } from '../services/insightService'
 import { detectHotspots } from '../services/hotspotService'
 import type { Hotspot } from '../services/hotspotService'
@@ -533,6 +533,13 @@ function TimelineSlider({
   )
   const hasTimeRange = minTimestamp < maxTimestamp
 
+  function clearPendingSliderUpdate() {
+    if (debounceTimerRef.current !== null) {
+      window.clearTimeout(debounceTimerRef.current)
+      debounceTimerRef.current = null
+    }
+  }
+
   useEffect(() => {
     setSliderTimestamp(clampedCurrentTimestamp)
   }, [clampedCurrentTimestamp])
@@ -542,13 +549,6 @@ function TimelineSlider({
       clearPendingSliderUpdate()
     }
   }, [])
-
-  function clearPendingSliderUpdate() {
-    if (debounceTimerRef.current !== null) {
-      window.clearTimeout(debounceTimerRef.current)
-      debounceTimerRef.current = null
-    }
-  }
 
   function handleSliderChange(nextTimestamp: number) {
     setSliderTimestamp(nextTimestamp)

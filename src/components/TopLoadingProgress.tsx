@@ -1,11 +1,7 @@
 import type { ReactNode } from 'react'
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { LoadingProgressContext } from '../context/loadingProgressContext'
 
-type LoadingProgressContextValue = {
-  setPageLoading: (isLoading: boolean) => void
-}
-
-const LoadingProgressContext = createContext<LoadingProgressContextValue | null>(null)
 const MINIMUM_ROUTE_PROGRESS_MS = 260
 const PROGRESS_COMPLETE_MS = 280
 
@@ -79,22 +75,6 @@ export function TopLoadingProgressProvider({ children }: { children: ReactNode }
       {children}
     </LoadingProgressContext.Provider>
   )
-}
-
-export function useTopLoadingProgress(isLoading: boolean) {
-  const context = useContext(LoadingProgressContext)
-
-  useEffect(() => {
-    if (!context) {
-      return
-    }
-
-    context.setPageLoading(isLoading)
-
-    return () => {
-      context.setPageLoading(false)
-    }
-  }, [context, isLoading])
 }
 
 function clearTimer(timerRef: React.MutableRefObject<number | null>) {
