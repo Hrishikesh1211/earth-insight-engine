@@ -5,7 +5,7 @@ Earth Insight Engine is a real-time environmental intelligence system that trans
 
 ---
 
-## 🚀 Overview
+## Overview
 
 This platform goes beyond simple data visualization by introducing an intelligence layer that detects patterns, highlights emerging hotspots, and evaluates environmental risk signals globally.
 
@@ -13,27 +13,27 @@ It is designed to simulate a **mission-control-style monitoring system** for env
 
 ---
 
-## 🧠 Core Capabilities
+## Core Capabilities
 
-### 🌐 Global Signal Monitor
+### Global Signal Monitor
 - Interactive world map powered by Leaflet
 - Real-time visualization of environmental events
 - Marker clustering and category-based color coding
 - Signal density hotspot detection
 
-### 📊 Signal Analysis (Analytics)
+### Signal Analysis (Analytics)
 - Event trend analysis over time
 - Category distribution and dominance
 - Regional hotspot identification
 - Signal velocity tracking
 
-### 🧠 Intelligence Layer
+### Intelligence Layer
 - Anomaly detection for unusual activity patterns
 - Trend-based projection insights
 - Global risk posture analysis
 - Category-level risk assessment
 
-### ⚙️ Data Controls
+### Data Controls
 - Dynamic filtering:
   - Date range (30 / 90 / 365 days)
   - Event status (open / closed)
@@ -42,7 +42,7 @@ It is designed to simulate a **mission-control-style monitoring system** for env
 
 ---
 
-## 🏗️ Architecture
+## Architecture
 
 - Global data layer using React Context (single fetch, shared across app)
 - Memoized computations for performance optimization
@@ -54,7 +54,7 @@ It is designed to simulate a **mission-control-style monitoring system** for env
 
 ---
 
-## ⚡ Performance & UX
+## Performance & UX
 
 - Data fetched once and reused globally
 - Heavy computations optimized with `useMemo`
@@ -64,7 +64,7 @@ It is designed to simulate a **mission-control-style monitoring system** for env
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 - React + TypeScript + Vite
 - Leaflet (map rendering)
@@ -74,7 +74,7 @@ It is designed to simulate a **mission-control-style monitoring system** for env
 
 ---
 
-## 📸 Screenshots
+## Screenshots
 - Main Page
 ![alt text](image.png)
 - Signals Page:
@@ -86,21 +86,21 @@ It is designed to simulate a **mission-control-style monitoring system** for env
 
 ---
 
-## 🌐 Data Source
+## Data Source
 
 - NASA EONET API  
   https://eonet.gsfc.nasa.gov/
 
 ---
 
-## ⚠️ Disclaimer
+## Disclaimer
 
 This system uses heuristic-based analysis for anomaly detection, trend insights, and risk assessment.  
 It is intended for exploratory and visualization purposes and does not represent a scientifically validated predictive model.
 
 ---
 
-## 🚀 Future Improvements
+## Future Improvements
 
 - Advanced ML-based prediction models
 - Confidence scoring for insights
@@ -109,6 +109,6 @@ It is intended for exploratory and visualization purposes and does not represent
 
 ---
 
-## 👨‍💻 Author
+## Author
 
 Built as an environmental intelligence system prototype demonstrating real-time data processing, geospatial visualization, and layered analytics.
